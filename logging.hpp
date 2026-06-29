@@ -12,25 +12,6 @@
 #define INCLUDE__2016_10_14__LOGGING_HPP
 
 
-#include <version>
-#include <codecvt>
-#include <clocale>
-#include <fstream>
-#include <chrono>
-#include <mutex>
-#include <memory>
-#include <string>
-#include <tuple>
-#include <thread>
-#include <functional>
-#include <filesystem>
-#include <system_error>
-#include <atomic>
-#include <deque>
-#include <csignal>
-#include <condition_variable>
-#include <optional>
-
 #ifndef LOGGING_DISABLE_BOOST_ASIO_ENDPOINT
 # if defined(__has_include)
 #  if __has_include(<boost/asio.hpp>)
@@ -167,6 +148,30 @@ namespace std {
 # endif
 #endif
 
+#include <version>
+#include <codecvt>
+#include <clocale>
+#include <fstream>
+#include <chrono>
+#include <mutex>
+#include <memory>
+
+#if defined (__cpp_lib_polymorphic_allocator)
+# include <memory_resource>
+#endif
+
+#include <string>
+#include <tuple>
+#include <thread>
+#include <functional>
+#include <filesystem>
+#include <system_error>
+#include <atomic>
+#include <deque>
+#include <csignal>
+#include <condition_variable>
+#include <optional>
+#include <string_view>
 
 //////////////////////////////////////////////////////////////////////////
 //
@@ -198,7 +203,13 @@ namespace std {
 
 namespace xlogger {
 
+#ifndef LOGGING_DISABLE_BOOST_FILESYSTEM
+	namespace fs = boost::filesystem;
+	using error_code = boost::system::error_code;
+#else
 	namespace fs = std::filesystem;
+	using error_code = std::error_code;
+#endif
 
 #ifndef LOGGING_DISABLE_BOOST_ASIO_ENDPOINT
 	namespace net = boost::asio;
@@ -212,8 +223,15 @@ namespace xlogger {
 #	define DEFAULT_LOG_MAXFILE_SIZE (-1)
 #endif // DEFAULT_LOG_MAXFILE_SIZE
 
+#ifdef NDEBUG
+#	define LOG2CONSOLE (false)
+#else
+#	define LOG2CONSOLE (true)
+#endif
 
 inline bool global_logging___ = true;
+inline bool global_console_logging___ = LOG2CONSOLE;
+inline bool global_write_logging___ = true;
 inline int64_t global_logfile_size___ = DEFAULT_LOG_MAXFILE_SIZE;
 
 
@@ -244,26 +262,25 @@ namespace xlogging_compress__ {
 
 	inline bool do_compress_gz(const std::string& infile)
 	{
-		std::string outfile = infile + LOGGING_GZ_SUFFIX;
-
-		gzFile out = gzopen(outfile.c_str(), "wb6f");
-		if (!out)
-			return false;
-
-		using gzFileType = typename std::remove_pointer<gzFile>::type;
-		std::unique_ptr<gzFileType, closegz_deleter> gz_closer(out);
-
 		FILE* in = fopen(infile.c_str(), "rb");
 		if (!in)
 			return false;
-
 		std::unique_ptr<FILE, closefile_deleter> FILE_closer(in);
-		std::unique_ptr<char[]> bufs(new char[LOGGING_GZ_BUFLEN]);
+
+		std::string outfile = infile + LOGGING_GZ_SUFFIX;
+		gzFile out = gzopen(outfile.c_str(), "wb6f");
+		if (!out)
+			return false;
+		using gzFileType = typename std::remove_pointer<gzFile>::type;
+		std::unique_ptr<gzFileType, closegz_deleter> gz_closer(out);
+
+		std::unique_ptr<char, decltype(&std::free)> bufs((char*)std::malloc(LOGGING_GZ_BUFLEN), &std::free);
 		char* buf = bufs.get();
 		int len;
 
-		for (;;) {
-			len = (int)fread(buf, 1, sizeof(buf), in);
+		for (;;)
+		{
+			len = (int)fread(buf, 1, LOGGING_GZ_BUFLEN, in);
 			if (ferror(in))
 				return false;
 
@@ -272,12 +289,11 @@ namespace xlogging_compress__ {
 
 			int total = 0;
 			int ret;
-			while (total < len) {
+			while (total < len)
+			{
 				ret = gzwrite(out, buf + total, (unsigned)len - total);
-				if (ret <= 0) {
-					// detail error information see gzerror(out, &ret);
+				if (ret <= 0)
 					return false;
-				}
 				total += ret;
 			}
 		}
@@ -353,9 +369,9 @@ namespace logger_aux__ {
 	{
 		struct LocalTime {
 			std::time_t time_;
-			std::tm tm_;
+			std::tm tm_{0};
 
-			LocalTime(std::time_t t) : time_(t) {}
+			explicit LocalTime(std::time_t t) : time_(t) {}
 
 			inline bool run() {
 				using namespace internal;
@@ -434,41 +450,6 @@ namespace logger_aux__ {
 		return state == 0;
 	}
 
-	inline std::optional<std::wstring> utf8_convert(std::string_view str)
-	{
-		uint8_t* start = (uint8_t*)str.data();
-		uint8_t* end = start + str.size();
-
-		std::wstring wstr;
-		uint32_t codepoint;
-		uint32_t state = 0;
-
-		for (; start != end; ++start)
-		{
-			switch (decode(&state, &codepoint, *start))
-			{
-			case 0:
-				if (codepoint <= 0xFFFF) [[likely]]
-				{
-					wstr.push_back(static_cast<wchar_t>(codepoint));
-					continue;
-				}
-				wstr.push_back(static_cast<wchar_t>(0xD7C0 + (codepoint >> 10)));
-				wstr.push_back(static_cast<wchar_t>(0xDC00 + (codepoint & 0x3FF)));
-				continue;
-			case 1:
-				return {};
-			default:
-				;
-			}
-		}
-
-		if (state != 0)
-			return {};
-
-		return wstr;
-	}
-
 	inline bool append(uint32_t cp, std::string& result)
 	{
 		if (!(cp <= 0x0010ffffu && !(cp >= 0xd800u && cp <= 0xdfffu)))
@@ -497,40 +478,6 @@ namespace logger_aux__ {
 		}
 
 		return true;
-	}
-
-	inline std::optional<std::string> utf16_convert(std::wstring_view wstr)
-	{
-		std::string result;
-
-		auto end = wstr.cend();
-		for (auto start = wstr.cbegin(); start != end;)
-		{
-			uint32_t cp = static_cast<uint16_t>(0xffff & *start++);
-
-			if (cp >= 0xdc00u && cp <= 0xdfffu) [[unlikely]]
-				return {};
-
-			if (cp >= 0xd800u && cp <= 0xdbffu)
-			{
-				if (start == end) [[unlikely]]
-					return {};
-
-				uint32_t trail = static_cast<uint16_t>(0xffff & *start++);
-				if (!(trail >= 0xdc00u && trail <= 0xdfffu)) [[unlikely]]
-					return {};
-
-				cp = (cp << 10) + trail + 0xFCA02400;
-			}
-
-			if (!append(cp, result))
-				return {};
-		}
-
-		if (result.empty())
-			return {};
-
-		return result;
 	}
 
 #ifdef WIN32
@@ -728,7 +675,7 @@ class auto_logger_file__
 	auto_logger_file__& operator=(const auto_logger_file__&) = delete;
 
 public:
-	auto_logger_file__(std::string log_path = "")
+	explicit auto_logger_file__(std::string log_path = "")
 	{
 		if (!log_path.empty())
 			m_log_path = log_path;
@@ -743,8 +690,8 @@ public:
 		if (!global_logging___)
 			return;
 
-		std::error_code ignore_ec;
-		if (!fs::exists(m_log_path, ignore_ec))
+		error_code ignore_ec;
+		if (!fs::exists(m_log_path, ignore_ec) && global_write_logging___)
 			fs::create_directories(
 				m_log_path.parent_path(), ignore_ec);
 	}
@@ -762,8 +709,8 @@ public:
 		if (!global_logging___)
 			return;
 
-		std::error_code ignore_ec;
-		if (!fs::exists(m_log_path, ignore_ec))
+		error_code ignore_ec;
+		if (!fs::exists(m_log_path, ignore_ec) && global_write_logging___)
 			fs::create_directories(
 				m_log_path.parent_path(), ignore_ec);
 	}
@@ -773,17 +720,9 @@ public:
 		return m_log_path.string();
 	}
 
-	inline void logging(bool disable) noexcept
-	{
-		m_disable_write = disable;
-	}
-
 	inline void write([[maybe_unused]] int64_t time,
 		const char* str, std::streamsize size)
 	{
-		if (m_disable_write)
-			return;
-
 		bool condition = false;
 		auto hours = time / 1000 / 3600;
 		auto last_hours = m_last_time / 1000 / 3600;
@@ -828,7 +767,7 @@ public:
 
 			m_last_time = time;
 
-			std::error_code ec;
+			error_code ec;
 			if (!fs::copy_file(m_log_path, filename, ec))
 				break;
 
@@ -837,9 +776,9 @@ public:
 
 #ifdef LOGGING_ENABLE_COMPRESS_LOGS
 			auto fn = filename.string();
-			std::thread th([fn]()
+			std::thread([fn]()
 				{
-					std::error_code ignore_ec;
+					error_code ignore_ec;
 					std::mutex& m = xlogging_compress__::compress_lock();
 					std::lock_guard lock(m);
 					if (!xlogging_compress__::do_compress_gz(fn))
@@ -855,8 +794,7 @@ public:
 					}
 
 					fs::remove(fn, ignore_ec);
-				});
-			th.detach();
+				}).detach();
 #endif
 			break;
 		}
@@ -881,28 +819,24 @@ private:
 	ofstream_ptr m_ofstream;
 	int64_t m_last_time{ -1 };
 	int64_t m_log_size{ 0 };
-	bool m_disable_write{ false };
 };
 
-#ifndef DISABLE_LOGGER_THREAD_SAFE
-#define LOGGER_LOCKS_() std::lock_guard \
+#ifndef DISABLE_XLOGGER_THREAD_SAFE
+#define XLOGGER_LOCKS_() std::lock_guard \
 	lock(logger_aux__::lock_single<std::mutex>())
 #else
-#define LOGGER_LOCKS_() ((void)0)
-#endif // LOGGER_THREAD_SAFE
+#define XLOGGER_LOCKS_() ((void)0)
+#endif // DISABLE_XLOGGER_THREAD_SAFE
 
 #ifndef LOGGER_DBG_VIEW_
-#if defined(WIN32) && \
-	(defined(LOGGER_DBG_VIEW) || \
-	defined(DEBUG) || \
-	defined(_DEBUG))
-#define LOGGER_DBG_VIEW_(x)                \
-	do {                                   \
-		::OutputDebugStringW((x).c_str()); \
-	} while (0)
-#else
-#define LOGGER_DBG_VIEW_(x) ((void)0)
-#endif // WIN32 && LOGGER_DBG_VIEW
+# if defined(WIN32) && (defined(DEBUG) || defined(_DEBUG))
+#  define LOGGER_DBG_VIEW_(x)           \
+    do {                                \
+     ::OutputDebugStringW((x).c_str()); \
+    } while (0)
+# else
+#  define LOGGER_DBG_VIEW_(x) ((void)0)
+# endif // WIN32
 #endif // LOGGER_DBG_VIEW_
 
 enum logger_level__ {
@@ -927,92 +861,95 @@ const inline std::string _LOGGER_WARN_STR__  = " WARN  ";
 const inline std::string _LOGGER_ERR_STR__   = " ERROR ";
 const inline std::string _LOGGER_FILE_STR__  = " FILE  ";
 
-inline void logger_output_console__([[maybe_unused]] bool disable_cout,
-	[[maybe_unused]] const logger_level__& level,
+inline void logger_output_console__([[maybe_unused]] const logger_level__& level,
 	[[maybe_unused]] const std::string& prefix,
 	[[maybe_unused]] const std::string& message) noexcept
 {
 #if defined(WIN32)
 
-#if !defined(DISABLE_LOGGER_TO_CONSOLE) || !defined(DISABLE_LOGGER_TO_DBGVIEW)
-	std::wstring title = *logger_aux__::utf8_utf16(prefix);
-	std::wstring msg = *logger_aux__::utf8_utf16(message);
+#if !defined(DISABLE_XLOGGER_TO_CONSOLE) || !defined(DISABLE_XLOGGER_TO_DBGVIEW)
+	std::wstring title;
+	std::wstring msg;
+	auto title_opt = logger_aux__::utf8_utf16(prefix);
+	if (title_opt)
+		title = *title_opt;
+	else
+		BOOST_ASSERT(false && "Log prefix is not valid UTF-8");
+	auto msg_opt = logger_aux__::utf8_utf16(message);
+	if (msg_opt)
+		msg = *msg_opt;
+	else
+		BOOST_ASSERT(false && "Log message is not valid UTF-8");
 #endif
 
-#if !defined(DISABLE_LOGGER_TO_CONSOLE)
-	if (!disable_cout)
+#if !defined(DISABLE_XLOGGER_TO_CONSOLE)
+	HANDLE handle_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	GetConsoleScreenBufferInfo(handle_stdout, &csbi);
+
+	switch (level)
 	{
-		HANDLE handle_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-		CONSOLE_SCREEN_BUFFER_INFO csbi;
-		GetConsoleScreenBufferInfo(handle_stdout, &csbi);
-
-		switch (level)
-		{
-		case _logger_info_id__:
-			SetConsoleTextAttribute(handle_stdout,
-				FOREGROUND_GREEN);
-			break;
-		case _logger_debug_id__:
-			SetConsoleTextAttribute(handle_stdout,
-				FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-			break;
-		case _logger_warn_id__:
-			SetConsoleTextAttribute(handle_stdout,
-				FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY);
-			break;
-		case _logger_error_id__:
-			SetConsoleTextAttribute(handle_stdout,
-				FOREGROUND_RED | FOREGROUND_INTENSITY);
-			break;
-		}
-
-		WriteConsoleW(handle_stdout,
-			title.data(), (DWORD)title.size(), nullptr, nullptr);
+	case _logger_info_id__:
 		SetConsoleTextAttribute(handle_stdout,
-			FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_BLUE);
-
-		WriteConsoleW(handle_stdout,
-			msg.data(), (DWORD)msg.size(), nullptr, nullptr);
-		SetConsoleTextAttribute(handle_stdout, csbi.wAttributes);
+			FOREGROUND_GREEN);
+		break;
+	case _logger_debug_id__:
+		SetConsoleTextAttribute(handle_stdout,
+			FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		break;
+	case _logger_warn_id__:
+		SetConsoleTextAttribute(handle_stdout,
+			FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY);
+		break;
+	case _logger_error_id__:
+		SetConsoleTextAttribute(handle_stdout,
+			FOREGROUND_RED | FOREGROUND_INTENSITY);
+		break;
 	}
+
+	WriteConsoleW(handle_stdout,
+		title.data(), (DWORD)title.size(), nullptr, nullptr);
+	SetConsoleTextAttribute(handle_stdout,
+		FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_BLUE);
+
+	WriteConsoleW(handle_stdout,
+		msg.data(), (DWORD)msg.size(), nullptr, nullptr);
+	SetConsoleTextAttribute(handle_stdout, csbi.wAttributes);
 #endif
 
-#if !defined(DISABLE_LOGGER_TO_DBGVIEW)
+#if !defined(DISABLE_XLOGGER_TO_DBGVIEW)
 	LOGGER_DBG_VIEW_(title + msg);
 #endif
 
-#elif !defined(DISABLE_LOGGER_TO_CONSOLE)
-	if (!disable_cout)
+#elif !defined(DISABLE_XLOGGER_TO_CONSOLE)
+	std::string out;
+
+	switch (level)
 	{
-		std::string out;
-
-		switch (level)
-		{
-		case _logger_info_id__:
-			std::format_to(std::back_inserter(out),
-				"\033[32m{}\033[0m{}", prefix, message);
-			break;
-		case _logger_debug_id__:
-			std::format_to(std::back_inserter(out),
-				"\033[1;32m{}\033[0m{}", prefix, message);
-			break;
-		case _logger_warn_id__:
-			std::format_to(std::back_inserter(out),
-				"\033[1;33m{}\033[0m{}", prefix, message);
-			break;
-		case _logger_error_id__:
-			std::format_to(std::back_inserter(out),
-				"\033[1;31m{}\033[0m{}", prefix, message);
-			break;
-		case _logger_file_id__:
-			// std::format_to(std::back_inserter(out),
-			//	"\033[1;34m{}\033[0m{}", prefix, message);
-			break;
-		}
-
-		std::cout << out;
-		std::cout.flush();
+	case _logger_info_id__:
+		std::format_to(std::back_inserter(out),
+			"\033[32m{}\033[0m{}", prefix, message);
+		break;
+	case _logger_debug_id__:
+		std::format_to(std::back_inserter(out),
+			"\033[1;32m{}\033[0m{}", prefix, message);
+		break;
+	case _logger_warn_id__:
+		std::format_to(std::back_inserter(out),
+			"\033[1;33m{}\033[0m{}", prefix, message);
+		break;
+	case _logger_error_id__:
+		std::format_to(std::back_inserter(out),
+			"\033[1;31m{}\033[0m{}", prefix, message);
+		break;
+	case _logger_file_id__:
+		// std::format_to(std::back_inserter(out),
+		//	"\033[1;34m{}\033[0m{}", prefix, message);
+		break;
 	}
+
+	std::cout << out;
+	std::cout.flush();
 #endif
 }
 
@@ -1098,7 +1035,7 @@ inline void logger_writer__(int64_t time, const logger_level__& level,
 	const std::string& message,
 	[[maybe_unused]] bool disable_cout = false) noexcept
 {
-	LOGGER_LOCKS_();
+	XLOGGER_LOCKS_();
 	static auto& logger = xlogger::logger_aux__::writer_single<
 		xlogger::auto_logger_file__>();
 	char ts[64] = { 0 };
@@ -1114,7 +1051,8 @@ inline void logger_writer__(int64_t time, const logger_level__& level,
 		return;
 
 #ifndef DISABLE_WRITE_LOGGING
-	logger.write(time, whole.c_str(), whole.size());
+	if (global_write_logging___)
+		logger.write(time, whole.c_str(), whole.size());
 #endif // !DISABLE_WRITE_LOGGING
 
 	// Output to systemd.
@@ -1129,7 +1067,8 @@ inline void logger_writer__(int64_t time, const logger_level__& level,
 
 	// Output to console.
 #if !defined(USE_SYSTEMD_LOGGING) && !defined(__ANDROID__)
-	logger_output_console__(disable_cout, level, prefix, tmp);
+	if (global_console_logging___ && !disable_cout)
+		logger_output_console__(level, prefix, tmp);
 #endif
 }
 
@@ -1193,17 +1132,24 @@ namespace logger_aux__ {
 
 		inline void internal_work()
 		{
-			while (!m_abort || !m_messages.empty())
-			{
-				std::unique_lock lock(m_internal_mutex);
-
-				if (m_messages.empty())
-					m_internal_cv.wait_for(lock, 128ms);
-
-				while (!m_messages.empty())
+			auto pull_message = [this]() mutable -> std::optional<internal_message>
 				{
+					std::unique_lock lock(m_internal_mutex);
+					if (m_messages.empty())
+						m_internal_cv.wait_for(lock, 128ms);
+					if (m_messages.empty())
+						return std::nullopt;
 					auto message = std::move(m_messages.front());
 					m_messages.pop_front();
+					return std::optional<internal_message>(std::move(message));
+				};
+
+			while (!m_abort || !m_messages.empty())
+			{
+				auto msg = pull_message();
+				if (msg)
+				{
+					auto& message = *msg;
 
 					logger_writer__(message.time_,
 						message.level_,
@@ -1305,11 +1251,14 @@ inline void turnon_logging() noexcept
 	global_logging___ = true;
 }
 
-inline void toggle_write_logging(bool disable)
+inline void toggle_write_logging(bool enable) noexcept
 {
-	auto_logger_file__& file =
-		logger_aux__::writer_single<xlogger::auto_logger_file__>();
-	file.logging(disable);
+	global_write_logging___ = enable;
+}
+
+inline void toggle_console_logging(bool enable) noexcept
+{
+	global_console_logging___ = enable;
 }
 
 inline void set_logfile_maxsize(int64_t size) noexcept
@@ -1338,6 +1287,27 @@ class logger___
 	logger___(const logger___&) = delete;
 	logger___& operator=(const logger___&) = delete;
 public:
+	inline logger___(logger___&& other) noexcept
+		: level_(other.level_)
+		, async_(other.async_)
+		, disable_cout_(other.disable_cout_)
+		, out_(std::move(other.out_))
+	{
+		other.ignore_ = true;
+	}
+
+	inline logger___& operator=(logger___&& other) noexcept
+	{
+		if (this == &other)
+			return *this;
+		level_ = other.level_;
+		async_ = other.async_;
+		disable_cout_ = other.disable_cout_;
+		out_ = std::move(other.out_);
+		other.ignore_ = true;
+		return *this;
+	}
+
 	logger___(const logger_level__& level,
 		bool async = false, bool disable_cout = false)
 		: level_(level)
@@ -1349,7 +1319,7 @@ public:
 	}
 	~logger___()
 	{
-		if (!global_logging___)
+		if (!global_logging___ || ignore_)
 			return;
 
 		// if global_logger_obj___ is nullptr, fallback to
@@ -1435,9 +1405,9 @@ public:
 	}
 	inline logger___& operator<<(const std::string& v)
 	{
-#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!global_logging___)
 			return *this;
+#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!logger_aux__::utf8_check_is_valid(v))
 		{
 			auto wres = logger_aux__::string_wide(v);
@@ -1451,18 +1421,44 @@ public:
 #endif
 		return strcat_impl(v);
 	}
+#if defined (__cpp_lib_polymorphic_allocator)
+	inline logger___& operator<<(const std::pmr::string& v)
+	{
+		if (!global_logging___)
+			return *this;
+#ifdef LOGGING_ENABLE_AUTO_UTF8
+		if (!logger_aux__::utf8_check_is_valid(v))
+		{
+			auto wres = logger_aux__::string_wide(v);
+			if (wres)
+			{
+				auto ret = logger_aux__::utf16_utf8(*wres);
+				if (ret)
+					return strcat_impl(*ret);
+			}
+		}
+#endif
+		return strcat_impl(v);
+	}
+#endif
 	inline logger___& operator<<(const std::wstring& v)
 	{
 		if (!global_logging___)
 			return *this;
-		return strcat_impl(*logger_aux__::utf16_utf8(v));
+		auto value = logger_aux__::utf16_utf8(v);
+		if (value)
+			return strcat_impl(*value);
+		return *this;
 	}
 	inline logger___& operator<<(const std::u16string& v)
 	{
 		if (!global_logging___)
 			return *this;
-		return strcat_impl(*logger_aux__::utf16_utf8(
-			{(const wchar_t*)v.data(), v.size()}));
+		auto value = logger_aux__::utf16_utf8(
+			{ (const wchar_t*)v.data(), v.size() });
+		if (value)
+			return strcat_impl(*value);
+		return *this;
 	}
 #if (__cplusplus >= 202002L)
 	inline logger___& operator<<(const std::u8string& v)
@@ -1472,9 +1468,9 @@ public:
 #endif
 	inline logger___& operator<<(const std::string_view& v)
 	{
-#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!global_logging___)
 			return *this;
+#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!logger_aux__::utf8_check_is_valid(v))
 		{
 			auto wres = logger_aux__::string_wide(v);
@@ -1491,9 +1487,9 @@ public:
 	inline logger___& operator<<(const boost::string_view& v)
 	{
 		std::string_view sv{v.data(), v.length()};
-#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!global_logging___)
 			return *this;
+#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!logger_aux__::utf8_check_is_valid(sv))
 		{
 			auto wres = logger_aux__::string_wide(sv);
@@ -1510,9 +1506,9 @@ public:
 	inline logger___& operator<<(const char* v)
 	{
 		std::string_view sv(v);
-#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!global_logging___)
 			return *this;
+#ifdef LOGGING_ENABLE_AUTO_UTF8
 		if (!logger_aux__::utf8_check_is_valid(sv))
 		{
 			auto wres = logger_aux__::string_wide(sv);
@@ -1530,7 +1526,10 @@ public:
 	{
 		if (!global_logging___)
 			return *this;
-		return strcat_impl(*logger_aux__::utf16_utf8(v));
+		auto value = logger_aux__::utf16_utf8(v);
+		if (value)
+			return strcat_impl(*value);
+		return *this;
 	}
 	inline logger___& operator<<(const void *v)
 	{
@@ -1729,7 +1728,7 @@ public:
 		return *this;
 	}
 #endif
-	inline logger___& operator<<(const fs::path& p) noexcept
+	inline logger___& operator<<(const std::filesystem::path& p) noexcept
 	{
 		if (!global_logging___)
 			return *this;
@@ -1799,9 +1798,10 @@ public:
 	}
 
 	std::string out_;
-	const logger_level__& level_;
+	logger_level__ level_;
 	bool async_;
 	bool disable_cout_;
+	bool ignore_{ false };
 };
 
 class empty_logger___
@@ -1815,18 +1815,20 @@ public:
 };
 } // namespace xlogger
 
-#if (defined(DEBUG) || defined(_DEBUG) || \
-	defined(ENABLE_LOGGER)) && !defined(DISABLE_LOGGER)
+#if !defined(DISABLE_XLOGGER)
 
 // API for logging.
-inline void init_logging(const std::string& path = "");
-inline std::string log_path();
-inline std::string log_path();
-inline void shutdown_logging();
-inline void turnoff_logging() noexcept;
-inline void turnon_logging() noexcept;
-inline void toggle_write_logging(bool disable);
-inline void set_logfile_maxsize(int64_t size) noexcept;
+namespace xlogger {
+	inline void init_logging(const std::string& path/* = ""*/);
+	inline std::string log_path();
+	inline std::string log_path();
+	inline void shutdown_logging();
+	inline void turnoff_logging() noexcept;
+	inline void turnon_logging() noexcept;
+	inline void toggle_write_logging(bool enable) noexcept;
+	inline void toggle_console_logging(bool enable) noexcept;
+	inline void set_logfile_maxsize(int64_t size) noexcept;
+}
 
 // API for logging.
 #define XLOG_DBG xlogger::logger___(xlogger::_logger_debug_id__)

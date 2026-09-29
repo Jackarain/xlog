@@ -159,6 +159,7 @@ namespace xlogger {
 #include <codecvt>
 #include <clocale>
 #include <sstream>
+#include <iostream>
 #include <chrono>
 #include <mutex>
 #include <memory>
@@ -662,7 +663,7 @@ namespace logger_aux__ {
 
 		using codecvt_type = std::codecvt<wchar_t, char, mbstate_t>;
 		std::locale sys_locale("");
-		mbstate_t in_state;
+		mbstate_t in_state{};
 
 		auto ret = std::use_facet<codecvt_type>(sys_locale).in(
 			in_state, first, last, snext, dest, dest + result.size(), dnext);
@@ -1708,6 +1709,7 @@ public:
 #endif
 		return strcat_impl(v);
 	}
+#ifndef LOGGING_DISABLE_BOOST_STRING_VIEW
 	inline logger___& operator<<(const boost::string_view& v)
 	{
 		std::string_view sv{v.data(), v.length()};
@@ -1727,6 +1729,7 @@ public:
 #endif
 		return strcat_impl(sv);
 	}
+#endif
 	inline logger___& operator<<(const char* v)
 	{
 		std::string_view sv(v);

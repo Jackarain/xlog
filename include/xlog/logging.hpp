@@ -118,9 +118,15 @@
 # endif
 #endif
 
+// 需要 <version> 来探测 __cpp_lib_format: 该宏由标准库头文件定义, 而
+// 此处的探测在包含 <format> 之前. 若上游没有包含 Boost 等会顺带定义该
+// 宏的头文件, 缺了 <version> 会把环境误判成"没有 std::format", 从而在
+// 未安装 {fmt} 的平台(如 MSVC)上错误地回退到 {fmt}.
+#include <version>
+
 #if defined(FORCE_USE_FMT_FORMAT) || \
 	!defined(__cpp_lib_format) || \
-	(_LIBCPP_VERSION < 170000) || \
+	(defined(_LIBCPP_VERSION) && (_LIBCPP_VERSION < 170000)) || \
 	defined(__ANDROID__)
 
 # ifdef _MSC_VER
@@ -155,7 +161,7 @@ namespace xlogger {
 # error "format not found"
 #endif
 
-#include <version>
+#include <cassert>
 #include <codecvt>
 #include <clocale>
 #include <sstream>
@@ -1048,12 +1054,12 @@ inline void logger_output_console__([[maybe_unused]] const logger_level__& level
 	if (title_opt)
 		title = *title_opt;
 	else
-		BOOST_ASSERT(false && "Log prefix is not valid UTF-8");
+		assert(false && "Log prefix is not valid UTF-8");
 	auto msg_opt = logger_aux__::utf8_utf16(message);
 	if (msg_opt)
 		msg = *msg_opt;
 	else
-		BOOST_ASSERT(false && "Log message is not valid UTF-8");
+		assert(false && "Log message is not valid UTF-8");
 #endif
 
 #if !defined(DISABLE_XLOGGER_TO_CONSOLE)
@@ -2007,7 +2013,7 @@ public:
 		}
 		else
 		{
-			BOOST_ASSERT("Not a date time" && false);
+			assert("Not a date time" && false);
 			out_ += "NOT A DATE TIME";
 		}
 

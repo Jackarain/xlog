@@ -1,0 +1,12 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: xlog
+Description: A feature-rich, header-only C++20 logging library
+Version: @PROJECT_VERSION@
+Requires:
+Libs: @XLOG_PC_LIBS@
+Libs.private: @XLOG_PC_LIBS_PRIVATE@
+Cflags: -I${includedir} -std=c++20

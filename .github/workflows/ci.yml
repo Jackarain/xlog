@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config \
+            libfmt-dev zlib1g-dev libboost-filesystem-dev libboost-system-dev \
+            libgtest-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja fmt zlib googletest
+
+      # Windows: 无 fmt/Boost/zlib 时头文件自动降级到 std::format 与
+      # std::filesystem, 顺带验证这条路径.
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Test
+        run: >
+          ctest --test-dir build --build-config ${{ matrix.build_type }}
+          --output-on-failure
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    env:
+      ASAN_OPTIONS: detect_leaks=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfmt-dev zlib1g-dev \
+            libboost-filesystem-dev libboost-system-dev libgtest-dev
+
+      - name: Configure
+        run: cmake --preset sanitize
+
+      - name: Build
+        run: cmake --build --preset sanitize
+
+      - name: Test
+        run: ctest --preset sanitize
+
+  minimal:
+    name: No optional dependencies
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfmt-dev libgtest-dev
+
+      # XLOG_ENABLE_BOOST=OFF / XLOG_ENABLE_COMPRESSION=OFF: 头文件必须能
+      # 在完全没有 Boost 与 zlib 的环境下编译运行.
+      - name: Configure
+        run: cmake --preset minimal
+
+      - name: Build
+        run: cmake --build --preset minimal
+
+      - name: Test
+        run: ctest --preset minimal
+
+  no-exceptions:
+    name: No exceptions / no RTTI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfmt-dev zlib1g-dev libgtest-dev
+
+      - name: Configure
+        run: cmake --preset no-exceptions
+
+      - name: Build
+        run: cmake --build --preset no-exceptions
+
+      - name: Test
+        run: ctest --preset no-exceptions
+
+  install-smoke:
+    name: Install + find_package + pkg-config
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfmt-dev \
+            zlib1g-dev libboost-filesystem-dev libboost-system-dev
+
+      - name: Install xlog
+        run: |
+          prefix="$RUNNER_TEMP/xlog-prefix"
+          cmake -S . -B build-install -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DXLOG_BUILD_TESTS=OFF -DXLOG_BUILD_EXAMPLES=OFF
+          cmake --build build-install
+          cmake --install build-install --prefix "$prefix"
+
+      - name: Consume via find_package
+        run: |
+          prefix="$RUNNER_TEMP/xlog-prefix"
+          cmake -S tests/install -B build-consumer -G Ninja \
+            -DCMAKE_PREFIX_PATH="$prefix"
+          cmake --build build-consumer
+          ./build-consumer/xlog_install_consumer
+
+      - name: Consume via pkg-config
+        run: |
+          prefix="$RUNNER_TEMP/xlog-prefix"
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          c++ -std=c++20 tests/install/consumer.cpp \
+            $(pkg-config --cflags --libs xlog) -o xlog-pc-consumer
+          ./xlog-pc-consumer
+
+  encoding:
+    name: UTF-8 BOM check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check UTF-8 BOM on code files
+        run: |
+          # 项目编码风格为 UTF-8 (with BOM)
+          err=0
+          while IFS= read -r f; do
+            if ! head -c3 "$f" | od -An -tx1 | tr -d ' \n' | grep -q 'efbbbf'; then
+              echo "missing BOM: $f"
+              err=1
+            fi
+          done < <(find include tests examples \( -name '*.hpp' -o -name '*.cpp' \) | sort)
+          exit $err

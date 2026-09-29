@@ -1,0 +1,100 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Debug build",
+      "binaryDir": "${sourceDir}/build",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "XLOG_BUILD_TESTS": "ON",
+        "XLOG_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release build",
+      "binaryDir": "${sourceDir}/build-release",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "XLOG_BUILD_TESTS": "ON",
+        "XLOG_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "sanitize",
+      "displayName": "ASan + UBSan build",
+      "binaryDir": "${sourceDir}/build-sanitize",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "no-exceptions",
+      "displayName": "-fno-exceptions -fno-rtti build",
+      "binaryDir": "${sourceDir}/build-noexcept",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS": "-fno-exceptions -fno-rtti",
+        "XLOG_BUILD_EXAMPLES": "OFF",
+        "XLOG_ENABLE_BOOST": "OFF"
+      }
+    },
+    {
+      "name": "minimal",
+      "displayName": "No optional dependency build",
+      "binaryDir": "${sourceDir}/build-minimal",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "XLOG_ENABLE_BOOST": "OFF",
+        "XLOG_ENABLE_COMPRESSION": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "sanitize", "configurePreset": "sanitize" },
+    { "name": "no-exceptions", "configurePreset": "no-exceptions" },
+    { "name": "minimal", "configurePreset": "minimal" }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "sanitize",
+      "configurePreset": "sanitize",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "no-exceptions",
+      "configurePreset": "no-exceptions",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "minimal",
+      "configurePreset": "minimal",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

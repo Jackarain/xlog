@@ -1,26 +1,33 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+
+# CMake / tooling
+compile_commands.json
+CMakeUserPresets.json
+.cache/
+.vscode/
+.idea/
+.clangd/
+
 # Prerequisites
 *.d
 
-# Compiled Object files
+# Compiled object files
 *.slo
 *.lo
 *.o
 *.obj
 
-# Precompiled Headers
+# Precompiled headers
 *.gch
 *.pch
 
-# Compiled Dynamic libraries
+# Compiled libraries
 *.so
 *.dylib
 *.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
 *.lai
 *.la
 *.a
@@ -30,3 +37,8 @@
 *.exe
 *.out
 *.app
+
+# Logs produced by the examples and the test suite
+logs/
+*.log
+*.log.gz

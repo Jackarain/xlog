@@ -227,3 +227,6 @@ c++ -std=c++20 $(pkg-config --cflags --libs xlog) my_app.cpp
   `VXLOG_FDBG("x")` 或非禁用构建。
 - **`string_wide()` 依赖系统 locale**：非 UTF-8 locale 下非 ASCII 输入会
   转换失败并返回 `std::nullopt`。
+- **MSVC 下非 ASCII 窄字符串字面量**：MSVC 默认按系统 ANSI 代码页转换窄
+  字符串字面量，中文等字符会退化成 `?`（日志里表现为乱码问号）。请在
+  编译选项中加入 `/utf-8`，或改用 `u8"..."` 字面量。

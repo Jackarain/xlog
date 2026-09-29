@@ -19,5 +19,5 @@ endif()
 
 foreach(example IN LISTS XLOG_EXAMPLES)
     target_link_libraries(${example}
-        PRIVATE xlog::xlog ${XLOG_EXAMPLE_WARNINGS})
+        PRIVATE xlog::xlog ${XLOG_EXAMPLE_WARNINGS} xlog_internal_options)
 endforeach()

@@ -39,7 +39,8 @@ endif()
 foreach(test_name IN LISTS XLOG_TESTS)
     add_executable(${test_name} ${test_name}.cpp test_main.cpp)
     target_link_libraries(${test_name}
-        PRIVATE xlog::xlog ${XLOG_GTEST_MAIN} ${XLOG_TEST_WARNINGS})
+        PRIVATE xlog::xlog ${XLOG_GTEST_MAIN} ${XLOG_TEST_WARNINGS}
+        xlog_internal_options)
     if(NOT MSVC)
         target_link_libraries(${test_name} PRIVATE pthread)
     endif()
@@ -55,7 +56,7 @@ endforeach()
 # ---------------------------------------------------------------------------
 add_executable(test_no_exceptions test_no_exceptions.cpp)
 target_link_libraries(test_no_exceptions
-    PRIVATE xlog::xlog ${XLOG_TEST_WARNINGS})
+    PRIVATE xlog::xlog ${XLOG_TEST_WARNINGS} xlog_internal_options)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(test_no_exceptions PRIVATE -fno-exceptions -fno-rtti)
 elseif(MSVC)
@@ -69,7 +70,8 @@ set_tests_properties(test_no_exceptions PROPERTIES TIMEOUT 120)
 # no-op and the header must not create any output.
 # ---------------------------------------------------------------------------
 add_executable(test_disabled test_disabled.cpp)
-target_link_libraries(test_disabled PRIVATE xlog::xlog ${XLOG_TEST_WARNINGS})
+target_link_libraries(test_disabled PRIVATE
+    xlog::xlog ${XLOG_TEST_WARNINGS} xlog_internal_options)
 target_compile_definitions(test_disabled PRIVATE DISABLE_XLOGGER)
 add_test(NAME test_disabled COMMAND test_disabled)
 set_tests_properties(test_disabled PROPERTIES TIMEOUT 120)

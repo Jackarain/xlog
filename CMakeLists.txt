@@ -103,6 +103,15 @@ else()
     target_compile_definitions(xlog INTERFACE LOGGING_DISABLE_COMPRESS_LOGS)
 endif()
 
+# 本仓库源码统一为 UTF-8 (with BOM). MSVC 默认把窄字符串字面量按当前 ANSI
+# 代码页转换, 非 ASCII 字符(如中文)会退化成 '?', 与其他平台的 UTF-8 行为
+# 不一致. 这里只作用于本仓库自身的测试/示例, 不作为接口选项导出给使用方.
+if(XLOG_BUILD_TESTS OR XLOG_BUILD_EXAMPLES)
+    add_library(xlog_internal_options INTERFACE)
+    target_compile_options(xlog_internal_options INTERFACE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+endif()
+
 # 额外的告警只作用于本仓库自己的目标(测试/示例), 不导出给使用方.
 if(XLOG_PEDANTIC AND (XLOG_BUILD_TESTS OR XLOG_BUILD_EXAMPLES))
     add_library(xlog_pedantic INTERFACE)

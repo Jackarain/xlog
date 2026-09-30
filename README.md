@@ -1,8 +1,8 @@
 # xlog
 
 一个 **header-only**、基于 **C++20** 的功能完整的日志库：支持日志压缩、
-异步写入、日志级别门控，并对接 Android logcat、systemd journal 与
-Windows DebugView 等日志系统。
+异步写入、日志级别门控，并对接 Android logcat、OpenHarmony hilog、
+systemd journal 与 Windows DebugView 等日志系统。
 
 ```cpp
 #include <xlog/logging.hpp>
@@ -18,8 +18,8 @@ Windows DebugView 等日志系统。
   构造时即被丢弃——不做格式化、不写盘，几乎零开销。
 - **日志文件**：按大小或按小时滚动，旧文件自动 gzip 压缩并保留。
 - **异步安全**：全局单点写入 + 互斥保护，多线程写入不丢失、不乱序。
-- **多后端**：控制台（ANSI 颜色）、文件、Android logcat、systemd journal、
-  Windows DebugView。
+- **多后端**：控制台（ANSI 颜色）、文件、Android logcat、OpenHarmony
+  hilog、systemd journal、Windows DebugView。
 - **用户钩子**：通过 `tag_invoke` 把日志转发到自己的日志系统，或在中止
   时停止输出。
 - **可裁剪**：`-DDISABLE_XLOGGER` 后所有日志宏退化为空操作。

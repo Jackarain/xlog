@@ -15,6 +15,7 @@ logger_writer__()           后端: 加锁 -> 用户钩子 -> 写文件/后端�
         +-- logger_output_console__  (ANSI 彩色控制台 / OutputDebugString)
         +-- logger_output_systemd__  (USE_SYSTEMD_LOGGING)
         +-- logger_output_android__  (__ANDROID__)
+        +-- logger_output_ohos__     (__OHOS__)
 
 AXLOG_*  --------------> async_logger___(后台线程 + 无界队列) --> logger_writer__
 ```

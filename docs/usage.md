@@ -173,7 +173,9 @@ namespace xlogger {
 | `LOGGING_DISABLE_BOOST_*` | `FILESYSTEM`/`ASIO_ENDPOINT`/`POSIX_TIME`/`STRING_VIEW`，跳过对应的可选重载。 |
 | `LOGGING_ENABLE_AUTO_UTF8` | Windows 下把非 UTF-8 字符串自动转换后再输出（默认开启）。 |
 | `USE_SYSTEMD_LOGGING` | 同时输出到 systemd journal。 |
-| `ENABLE_ANDROID_LOG` | 同时输出到 Android logcat（Android 默认开启）。 |
+| `ENABLE_ANDROID_LOG` | Android 上保留文件写入（默认仅输出 logcat）。 |
+| `ENABLE_OHOS_LOG` | OpenHarmony 上保留文件写入（默认仅输出 hilog）。 |
+| `LOG_TAG` / `LOG_DOMAIN` | OpenHarmony hilog 的 tag 与 domain，默认 `xlog` / `0`。 |
 | `LOG_APPNAME` | 应用名，用于日志文件名与 Android tag，默认 `application`。 |
 | `DEFAULT_LOG_MAXFILE_SIZE` | 默认单文件大小上限，默认 `-1`（按小时滚动）。 |
 

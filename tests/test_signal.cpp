@@ -21,8 +21,8 @@ TEST(signal, signal_semantics)
 #else
 
 #include <csignal>
-#include <cstdint>
 #include <ctime>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -35,8 +35,17 @@ namespace {
 		crash_sigsegv,
 	};
 
-	// volatile 限定使编译器无法静态判定其取值, 避免空指针解引用告警.
-	volatile std::intptr_t* volatile g_crash_address = nullptr;
+	// 写 PROT_NONE 映射制造真实缺页, 得到硬件触发的 SIGSEGV. 不用空指针
+	// 解引用: 那是 UB, 会被 UBSan/ASan 提前拦截而走不到信号处理函数.
+	void trigger_segv()
+	{
+		void* page = ::mmap(nullptr, 4096, PROT_NONE,
+			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (page == MAP_FAILED)
+			::_exit(1);
+
+		*static_cast<volatile int*>(page) = 1;
+	}
 
 	// 子进程: 触发指定信号后正常走到 _exit(0)(父进程据此判定信号被吞掉);
 	// 关掉 core dump 以免测试目录留下大文件.
@@ -51,7 +60,7 @@ namespace {
 			::raise(SIGTERM);
 			break;
 		case child_action::crash_sigsegv:
-			*g_crash_address = 1;
+			trigger_segv();
 			break;
 		}
 
@@ -75,38 +84,30 @@ namespace {
 		::waitpid(pid, &status, 0);
 		return false;
 	}
+
+	// 在 fork 出的子进程中触发信号, 断言其以 expect_signal 终止.
+	void expect_child_dies_by_signal(child_action action, int expect_signal)
+	{
+		int status = 0;
+		const ::pid_t pid = ::fork();
+		ASSERT_NE(-1, pid);
+		if (pid == 0)
+			trigger_in_child(action);
+
+		ASSERT_TRUE(wait_child(pid, status, 5000));
+		ASSERT_TRUE(WIFSIGNALED(status));
+		EXPECT_EQ(expect_signal, WTERMSIG(status));
+	}
 }
 
 TEST(signal, sigterm_is_not_swallowed)
 {
-	int status = 0;
-	const ::pid_t pid = ::fork();
-	ASSERT_NE(-1, pid);
-	if (pid == 0)
-		trigger_in_child(child_action::raise_sigterm);
-
-	ASSERT_TRUE(wait_child(pid, status, 3000));
-	EXPECT_TRUE(WIFSIGNALED(status));
-	if (WIFSIGNALED(status))
-	{
-		EXPECT_EQ(SIGTERM, WTERMSIG(status));
-	}
+	expect_child_dies_by_signal(child_action::raise_sigterm, SIGTERM);
 }
 
 TEST(signal, fatal_signal_terminates_process)
 {
-	int status = 0;
-	const ::pid_t pid = ::fork();
-	ASSERT_NE(-1, pid);
-	if (pid == 0)
-		trigger_in_child(child_action::crash_sigsegv);
-
-	ASSERT_TRUE(wait_child(pid, status, 5000));
-	EXPECT_TRUE(WIFSIGNALED(status));
-	if (WIFSIGNALED(status))
-	{
-		EXPECT_EQ(SIGSEGV, WTERMSIG(status));
-	}
+	expect_child_dies_by_signal(child_action::crash_sigsegv, SIGSEGV);
 }
 
 #endif

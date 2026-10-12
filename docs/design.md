@@ -73,9 +73,17 @@ if (disabled() || level_filtered(level_))
 
 ## 5. 崩溃与信号
 
-`async_logger___` 构造时注册信号处理（`SIGTERM`/`SIGABRT`/`SIGFPE`/
-`SIGSEGV`/`SIGILL`），Windows 下再挂 `SetUnhandledExceptionFilter`。
-处理方式是释放全局异步对象，析构会排空队列，从而尽量避免崩溃时丢日志。
+`async_logger___` 构造时注册致命信号处理（`SIGABRT`/`SIGFPE`/`SIGSEGV`/
+`SIGILL`），Windows 下再挂 `SetUnhandledExceptionFilter`。处理函数运行在
+信号上下文，只调用 async-signal-safe 的函数：不销毁 logger（其析构会 join
+日志线程并加锁，若信号打断了日志线程自身会造成自我 join 死锁），而是置位
+终止标志，给出一个有限的等待窗口让异步线程排空队列，随后恢复默认处理并
+重新触发该信号，让进程按原语义终止（保留 core dump）。
+
+库内不注册 `SIGTERM`：`SIGTERM` 不是崩溃，优雅退出应由应用统一处理。库内
+注册既会覆盖应用（如 asio `signal_set`）的处理函数，又会因处理函数返回而
+使进程无法被 `SIGTERM` 终止。应用应在退出路径调用 `shutdown_logging()`
+（或依赖 `INIT_ASYNC_LOGGING()` 的析构）落盘日志。
 
 ## 6. 线程安全
 

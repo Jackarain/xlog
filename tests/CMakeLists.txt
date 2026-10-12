@@ -29,6 +29,7 @@ set(XLOG_TESTS
     test_utf
     test_file
     test_init
+    test_signal
     test_rotate
     test_console)
 

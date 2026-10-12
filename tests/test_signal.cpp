@@ -35,13 +35,14 @@ namespace {
 		crash_sigsegv,
 	};
 
-	// 写 PROT_NONE 映射制造真实缺页, 得到硬件触发的 SIGSEGV. 不用空指针
-	// 解引用: 那是 UB, 会被 UBSan/ASan 提前拦截而走不到信号处理函数.
+	// 写一段刚 munmap 掉的地址制造真实缺页, 得到硬件触发的 SIGSEGV. 不用
+	// 空指针解引用(属 UB, 会被 UBSan/ASan 提前拦截), 也不用 PROT_NONE 映射
+	// (Darwin 把保护错误上报为 SIGBUS 而非 SIGSEGV).
 	void trigger_segv()
 	{
-		void* page = ::mmap(nullptr, 4096, PROT_NONE,
+		void* page = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
 			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if (page == MAP_FAILED)
+		if (page == MAP_FAILED || ::munmap(page, 4096) != 0)
 			::_exit(1);
 
 		*static_cast<volatile int*>(page) = 1;
